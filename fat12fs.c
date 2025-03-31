@@ -358,6 +358,7 @@ fat12fsGetFatEntry(struct fat12fs *fs, int index)
 	return (val);
 }
 
+/*#######################################	Work Here	##############################################*/
 
 /**
  * Print the FAT table out to the supplied FILE pointer
@@ -368,10 +369,26 @@ fat12fsGetFatEntry(struct fat12fs *fs, int index)
 int
 fat12fsDumpFat(FILE *ofp, struct fat12fs *fs)
 {
-	fprintf(stderr, "fat12fsDumpFat() -- NOT IMPLEMENTED YET\n");
-	/* Not implemented yet, so just return an error */
-	/* ??? */
-	return -1;
+	fprintf(ofp, "Dump :: FAT\n");
+	int i;
+
+	for (i = 0; i < fs->fs_fatsize; i++) {
+		if (i % 16 == 0) {
+			fprintf(ofp, "%4d : ", i); // example says dec but hex is requested, i matched example
+		}
+
+		fprintf(ofp, "%03x ", fat12fsGetFatEntry(fs, i));
+
+		if ((i + 1) % 16 == 0) {
+			fprintf(ofp, "\n");
+		}
+	}
+
+	if (fs->fs_fatsize % 16 != 0) {
+		fprintf(ofp, "\n");
+	}
+
+	return 0;
 }
 
 /**
@@ -384,10 +401,40 @@ fat12fsDumpFat(FILE *ofp, struct fat12fs *fs)
 int
 fat12fsDumpRootdir(FILE *ofp, struct fat12fs *fs)
 {
-	fprintf(stderr, "fat12fsDumpRootdir() -- NOT IMPLEMENTED YET\n");
-	/* Not implemented yet, so just return an error */
-	/* ??? */
-	return -1;
+	fprintf(ofp, "Dump :: Root Dir\n");
+	int i;
+	fat12fs_DIRENTRY *fatEntry;
+
+	for (i = 0; i < fs->fs_rootdirsize; i++) {
+		fatEntry = &fs->fs_rootdirentry[i];
+
+		// Skip empty entries
+		if (fatEntry->de_name[0] == NAME0_EMPTY) {
+			continue;
+		}
+
+		// Deleted entries
+		if (fatEntry->de_name[0] == NAME0_DELETED) {
+			fprintf(ofp, "%4d : DEL [%.8s.%.3s]\n", i, fatEntry->de_name, fatEntry->de_nameext);
+			continue;
+		}
+
+		// Volume label
+		if (fatEntry->de_attributes & ATTR_VOLUME) {
+			fprintf(ofp, "%4d : VOL [%.8s.%.3s] (%08x bytes, start %d)\n", i, fatEntry->de_name, fatEntry->de_nameext, fatEntry->de_filelen, fatEntry->de_fileblock0);
+			continue;
+		}
+
+		// Regular file
+		fprintf(ofp, "%4d : FILE [%.8s.%.3s] (%x bytes, start %x)\n",
+			i,
+			fatEntry->de_name,
+			fatEntry->de_nameext,
+			fatEntry->de_filelen,
+			fatEntry->de_fileblock0);
+	}
+
+	return 0;
 }
 
 /**
@@ -406,11 +453,62 @@ fat12fsSearchRootdir(
 	struct fat12fs *fs,
 	const char *filename)
 {
-	fprintf(stderr, "fat12fsSearchRootdir() -- NOT IMPLEMENTED YET\n");
-	/* Not implemented yet, so just return an error */
-	/* ??? */
+	int i;
+	char name[9] = {0}, ext[4] = {0}, fullName[13] = {0};
+	struct fat12fs_DIRENTRY *entry;
+
+	// Split the input filename into name and extension
+	char *dot = strchr(filename, '.');
+	if (dot) {
+		size_t name_len = dot - filename;
+		if (name_len > 8) name_len = 8; 
+		strncpy(name, filename, name_len);
+		name[name_len] = '\0';
+		
+		strncpy(ext, dot + 1, 3);
+		ext[3] = '\0';
+	} else {
+		strncpy(name, filename, 8);
+		name[8] = '\0';
+	}
+
+	// Convert to uppercase 
+	for (i = 0; name[i]; i++) name[i] = toupper(name[i]);
+	for (i = 0; ext[i]; i++) ext[i] = toupper(ext[i]);
+
+	for (i = 0; i < fs->fs_rootdirsize; i++) {
+		entry = &fs->fs_rootdirentry[i];
+
+		// Skip empty or deleted entries
+		if (entry->de_name[0] == NAME0_EMPTY || entry->de_name[0] == NAME0_DELETED) {
+			continue;
+		}
+
+		// Skip volume 
+		if (entry->de_attributes & ATTR_VOLUME) {
+			continue;
+		}
+
+		// Build the filename from the 8-byte name and 3-byte extension
+		strncpy(fullName, entry->de_name, 8);
+		for (int j = 7; j >= 0 && fullName[j] == ' '; j--) fullName[j] = '\0';
+		
+		if (entry->de_nameext[0] != ' ') {
+			strcat(fullName, ".");
+			strncat(fullName, entry->de_nameext, 3);
+		}
+		
+		for (int j = strlen(fullName) - 1; j >= 0 && fullName[j] == ' '; j--) fullName[j] = '\0';
+
+		// Compare the built filename with input filename
+		if (strcasecmp(fullName, filename) == 0) {
+			return i; 
+		}
+	}
+
 	return -1;
 }
+
 
 /**
  * Use the fat12fsRawDiskRead() function to load a logical
@@ -423,10 +521,22 @@ fat12fsLoadDataBlock(
 	char *buffer,
 	int index)
 {
-	fprintf(stderr, "fat12fsLoadDataBlock() -- NOT IMPLEMENTED YET\n");
-	/* Not implemented yet, so just return an error */
-	/* ??? */
-	return -1;
+	// Ensure the index is valid
+	if (index < 2 || index >= fs->fs_fssize) {
+		fprintf(stderr, "Invalid block index: %d\n", index);
+		return -1;
+	}
+
+	// Calculate the physical block number
+	int physicalBlock = fs->fs_datablock0 + (index - 2);
+
+	// Read the block into the buffer
+	if (fat12fsRawDiskRead(fs->fs_fd, physicalBlock, buffer) < 0) {
+		fprintf(stderr, "Failed to read block %d\n", index);
+		return -1;
+	}
+
+	return 0;
 }
 
 /**
@@ -453,28 +563,59 @@ fat12fsVerifyEOF(
 	curblock = fs->fs_rootdirentry[dirEntryIndex].de_fileblock0;
 	bytesRemainInFile = fs->fs_rootdirentry[dirEntryIndex].de_filelen;
 
+	// Ensure the directory entry index is valid
+	if (dirEntryIndex < 0 || dirEntryIndex >= fs->fs_rootdirsize) {
+		fprintf(stderr, "Invalid directory entry index: %d\n", dirEntryIndex);
+		return -1;
+	}
+	fat12fs_DIRENTRY *dirEntry = &fs->fs_rootdirentry[dirEntryIndex];
+	// Ensure the entry corresponds to a file
+	if (dirEntry->de_name[0] == NAME0_EMPTY || dirEntry->de_name[0] == NAME0_DELETED || (dirEntry->de_attributes & ATTR_VOLUME)) {
+		return -1;
+	}
+
+	// Traverse the FAT chain
 	while (bytesRemainInFile > 0) {
+		if (curblock < 2 || curblock >= fs->fs_fatsize) {
+			fprintf(stderr, "Invalid block in FAT chain: %d\n", curblock);
+			return 0;
+		}
 
-		if (bytesRemainInFile < FS_BLKSIZE)
-			bytesThisBlock = bytesRemainInFile;
-		else
-			bytesThisBlock = FS_BLKSIZE;
-
-		bytesRemainInFile -= FS_BLKSIZE;
+		bytesThisBlock = (bytesRemainInFile < FS_BLKSIZE) ? bytesRemainInFile : FS_BLKSIZE;
+		bytesRemainInFile -= bytesThisBlock;
 
 		if (bytesRemainInFile > 0) {
-			if (curblock >= FAT12_EOF1 && curblock <= FAT12_EOFF)
-			    return 0;
 			curblock = fat12fsGetFatEntry(fs, curblock);
+			if (curblock >= FAT12_EOF1 && curblock <= FAT12_EOFF) {
+				fprintf(stderr, "Unexpected EOF in FAT chain\n");
+			    return 0;
+			}
 		}
 	}
 
+	// Ensure the last block is marked as EOF
 	curblock = fat12fsGetFatEntry(fs, curblock);
-	if ((curblock & FAT12_EOF1) == FAT12_EOF1) {
-		return 1;
+	if (curblock < FAT12_EOF1 || curblock > FAT12_EOFF) {
+		fprintf(stderr, "Last block not EOF\n");
+		return 0;
 	}
 
-	return -1;
+	// Additional check: Ensure the file size matches the number of blocks
+	int totalBlocks = (dirEntry->de_filelen + FS_BLKSIZE - 1) / FS_BLKSIZE;
+	int traversedBlocks = 0;
+	curblock = dirEntry->de_fileblock0;
+
+	while (curblock < FAT12_EOF1 && traversedBlocks < totalBlocks) {
+		traversedBlocks++;
+		curblock = fat12fsGetFatEntry(fs, curblock);
+	}
+
+	if (traversedBlocks != totalBlocks) {
+		fprintf(stderr, "Wrong file size with FAT chain length\n");
+		return 0;
+	}
+
+	return 1;
 }
 
 /**
@@ -486,6 +627,9 @@ fat12fsVerifyEOF(
  *    - use the fat12fsLoadDataBlock() function to load the blocks
  *	of data from the file
  */
+
+ // need to be fixed
+
 int
 fat12fsReadData(
 	struct fat12fs *fs,
@@ -494,10 +638,61 @@ fat12fsReadData(
 	int startpos,
 	int nBytesToCopy)
 {
-	fprintf(stderr, "fat12fsReadData() -- NOT IMPLEMENTED YET\n");
-	/* Not implemented yet, so just return an error */
-	/* ??? */
-	return -1;
+	// Find the file in the root directory
+	int dirEntryIndex = fat12fsSearchRootdir(fs, filename);
+	if(dirEntryIndex < 0){
+		return -1;  
+	}
+
+	struct fat12fs_DIRENTRY *dirEntry = &fs->fs_rootdirentry[dirEntryIndex];
+
+	if (startpos >= dirEntry->de_filelen) {
+		fprintf(stderr, "Start position %d is beyond the end of the file\n", startpos);
+		return 0; // No bytes to read
+	}
+
+	if (startpos + nBytesToCopy > dirEntry->de_filelen) {
+		nBytesToCopy = dirEntry->de_filelen - startpos;
+	}
+
+	int bytesRead = 0;
+	int curblock = dirEntry->de_fileblock0;
+	int offset = startpos;
+	int bytesToRead = nBytesToCopy;
+	char bBuffer[FS_BLKSIZE];
+
+	// Traverse the FAT chain to read the data
+	while (bytesToRead > 0 && curblock >= 2 && curblock < fs->fs_fatsize) {
+		// Load the current block
+		if (fat12fsLoadDataBlock(fs, bBuffer, curblock) < 0) {
+			fprintf(stderr, "Failed to load block %d\n", curblock);
+			return -1;
+		}
+
+		// Calculate the offset within the current block
+		int blockOffset = offset % FS_BLKSIZE;
+		int bytesInBlock = FS_BLKSIZE - blockOffset;
+
+		// Determine how many bytes to copy from this block
+		int bytesToCopy = (bytesToRead < bytesInBlock) ? bytesToRead : bytesInBlock;
+
+		// Copy the data to the buffer
+		memcpy(buffer + bytesRead, bBuffer + blockOffset, bytesToCopy);
+
+		// Update counters and pointers
+		bytesRead += bytesToCopy;
+		bytesToRead -= bytesToCopy;
+		offset += bytesToCopy;
+
+		// Move to the next block in the FAT chain
+		int nextBlock = fat12fsGetFatEntry(fs, curblock);
+		if (nextBlock >= FAT12_EOF1 && nextBlock <= FAT12_EOFF) {
+			break; // Stop if EOF is reached
+		}
+		curblock = nextBlock;
+	}
+
+	return bytesRead;
 }
 
 
