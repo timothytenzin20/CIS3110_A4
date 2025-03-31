@@ -649,7 +649,7 @@ fat12fsReadData(
 	int nBytesToCopy)
 {
 	// check if the file exists
-	fprintf(stdout, "Read :: Data Bytes - file '%s', %d bytes, start %d\n", filename, nBytesToCopy, startpos);
+	fprintf(stdout, "Read :: Data Bytes - file '%s', %x bytes, start %x\n", filename, nBytesToCopy, startpos);
 	int dirEntryIndex = fat12fsSearchRootdir(fs, filename);
 	if (dirEntryIndex < 0) {
 		fprintf(stderr, "File '%s' not found in root directory\n", filename);
