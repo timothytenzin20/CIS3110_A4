@@ -3,6 +3,7 @@ CFLAGS = -g
 
 EXE_FAT12READER	= fat12reader
 EXE_WRITEDATA	= writedata
+TARFILE		= A4.tar
 
 OBJS_FAT12READER	= \
 		main.o \
@@ -25,6 +26,9 @@ clean :
 	rm -f $(EXE_FAT12READER)
 	rm -f $(OBJS_WRITEDATA)
 	rm -f $(EXE_WRITEDATA)
+
+$(TARFILE) tarfile tar :
+	tar cvf $(TARFILE) *.md *.c *.h makefile
 
 tags : dummy
 	ctags *.c 
