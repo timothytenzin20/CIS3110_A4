@@ -1,4 +1,4 @@
-% ./floppytool smallfiles.fd0
+% ./fat12reader smallfiles.fd0
 Mounted :: loaded bootblock, fat and rootdir
 Filesystem data:
    size (bytes): 0x164200 (1458688) 1424kB
