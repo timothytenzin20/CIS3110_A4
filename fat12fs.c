@@ -640,8 +640,6 @@ fat12fsVerifyEOF(
  *	of data from the file
  */
 
- // need to be fixed
-
 int
 fat12fsReadData(
 	struct fat12fs *fs,
@@ -694,7 +692,18 @@ fat12fsReadData(
 
 		int bOffset = offset;
 		int bytesInBlock = FS_BLKSIZE - bOffset;
-		int bytesToTransfer = (bytesToLoad < bytesInBlock) ? bytesToLoad : bytesInBlock;
+		if (bytesInBlock <= 0) {
+			fprintf(stderr, "Invalid block offset: %d\n", bOffset);
+			return -1;
+		}
+
+		// check number of bytes to transfer in this block
+		int bytesToTransfer;
+		if (bytesToLoad < bytesInBlock) {
+			bytesToTransfer = bytesToLoad;
+		} else {
+			bytesToTransfer = bytesInBlock;
+		}
 
 		memcpy(buffer + bytesLoaded, bBuffer + bOffset, bytesToTransfer);
 		bytesLoaded += bytesToTransfer;
